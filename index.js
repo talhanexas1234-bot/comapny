@@ -24,6 +24,9 @@ if (!MONGODB_URI) {
   process.exit(1);
 }
 
+const maskedUri = MONGODB_URI.replace(/:([^@/]+)@/, ":****@");
+console.log("Connecting to MongoDB:", maskedUri);
+
 // MongoDB Connection
 mongoose
   .connect(MONGODB_URI, {
