@@ -13,19 +13,36 @@ const JWT_SECRET =
 const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL || "sabadigixvalley@gmail.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "12345678";
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
+if (!MONGODB_URI) {
+  console.error("MONGODB_URI environment variable is required!");
+  process.exit(1);
+}
+
 // MongoDB Connection
 mongoose
-  .connect(
-    process.env.MONGODB_URI ||
-      "mongodb+srv://hamzaamjad038:uX3hZWtmkzpMBjS0@cluster0.a5w2uye.mongodb.net/digixvalley?retryWrites=true&w=majority",
-  )
+  .connect(MONGODB_URI, {
+    serverSelectionTimeoutMS: 10000,
+  })
   .then(() => console.log("MongoDB Connected Successfully"))
-  .catch((err) => console.error("MongoDB Connection Error:", err));
+  .catch((err) => {
+    console.error("MongoDB Connection Error:", err);
+    process.exit(1);
+  });
+
+const ensureDbConnected = (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      message: "Database not connected. Please try again in a moment.",
+    });
+  }
+  next();
+};
 
 // Registration Schema
 const registrationSchema = new mongoose.Schema({
@@ -100,7 +117,7 @@ app.post("/api/admin/login", async (req, res) => {
 });
 
 // Submit Registration
-app.post("/api/register", async (req, res) => {
+app.post("/api/register", ensureDbConnected, async (req, res) => {
   try {
     const {
       fullName,
@@ -156,7 +173,7 @@ app.post("/api/register", async (req, res) => {
 });
 
 // Get All Registrations (Admin - Protected)
-app.get("/api/registrations", authenticateToken, async (req, res) => {
+app.get("/api/registrations", authenticateToken, ensureDbConnected, async (req, res) => {
   try {
     const registrations = await Registration.find().sort({ submittedAt: -1 });
     res.status(200).json({
@@ -170,7 +187,7 @@ app.get("/api/registrations", authenticateToken, async (req, res) => {
 });
 
 // Get Single Registration (Admin - Protected)
-app.get("/api/registrations/:id", authenticateToken, async (req, res) => {
+app.get("/api/registrations/:id", authenticateToken, ensureDbConnected, async (req, res) => {
   try {
     const registration = await Registration.findById(req.params.id);
     if (!registration) {
@@ -183,7 +200,7 @@ app.get("/api/registrations/:id", authenticateToken, async (req, res) => {
 });
 
 // Delete Registration (Admin - Protected)
-app.delete("/api/registrations/:id", authenticateToken, async (req, res) => {
+app.delete("/api/registrations/:id", authenticateToken, ensureDbConnected, async (req, res) => {
   try {
     const registration = await Registration.findByIdAndDelete(req.params.id);
     if (!registration) {
@@ -200,7 +217,12 @@ app.delete("/api/registrations/:id", authenticateToken, async (req, res) => {
 
 // Health Check
 app.get("/api/health", (req, res) => {
-  res.status(200).json({ status: "OK", message: "Server is running!" });
+  const dbConnected = mongoose.connection.readyState === 1;
+  res.status(dbConnected ? 200 : 503).json({
+    status: dbConnected ? "OK" : "ERROR",
+    message: dbConnected ? "Server is running!" : "Database not connected",
+    database: dbConnected ? "connected" : "disconnected",
+  });
 });
 
 const PORT = process.env.PORT || 5000;
