@@ -51,7 +51,18 @@ function getMongoUri() {
   const host = process.env.MONGODB_HOST?.trim();
   const db = process.env.MONGODB_DB?.trim() || "digixvalley";
 
-  if (user && password && host) {
+  if (user && password) {
+    if (!host) {
+      console.error("MONGODB_HOST is required (e.g. cluster0.xxxxx.mongodb.net)");
+      return null;
+    }
+    if (!host.includes(".mongodb.net")) {
+      console.error(
+        `Invalid MONGODB_HOST: "${host}" — use full Atlas host, not part of password`,
+      );
+      return null;
+    }
+    console.log("MongoDB config: using separate env variables");
     return buildMongoUri(user, password, host, db);
   }
 
@@ -60,7 +71,20 @@ function getMongoUri() {
     return null;
   }
 
-  return normalizeMongoUri(rawUri);
+  console.log("MongoDB config: parsing MONGODB_URI");
+  const normalized = normalizeMongoUri(rawUri);
+
+  if (!normalized.includes(".mongodb.net")) {
+    console.error("Could not parse MONGODB_URI — password may contain @ symbol.");
+    console.error("Use these Railway variables instead:");
+    console.error("  MONGODB_USER=hamzaamjad038");
+    console.error("  MONGODB_PASSWORD=your-password");
+    console.error("  MONGODB_HOST=cluster0.zwgplmh.mongodb.net");
+    console.error("  MONGODB_DB=jurzbind");
+    return null;
+  }
+
+  return normalized;
 }
 
 function validateMongoUri(uri) {
@@ -91,7 +115,9 @@ if (!MONGODB_URI || !validateMongoUri(MONGODB_URI)) {
 }
 
 const maskedUri = MONGODB_URI.replace(/:([^@/]+)@/, ":****@");
-console.log("Connecting to MongoDB:", maskedUri);
+const hostLog = MONGODB_URI.match(/@([\w.-]+\.mongodb\.net)/)?.[1] || "unknown";
+console.log("Connecting to MongoDB host:", hostLog);
+console.log("Connection string:", maskedUri);
 
 // MongoDB Connection
 mongoose
