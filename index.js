@@ -25,14 +25,16 @@ function normalizeMongoUri(uri) {
   }
 
   const rest = uri.slice(prefix.length);
-  const hostMatch = rest.match(/@(cluster[\w.-]+\.mongodb\.net\/.+)$/i);
+  const hostMatch = rest.match(/@(cluster[\w.-]+\.mongodb\.net)(?:\/(.*))?$/i);
 
   if (!hostMatch) {
     return uri;
   }
 
-  const hostAndPath = hostMatch[1];
-  const credsPart = rest.slice(0, rest.length - hostAndPath.length - 1);
+  const host = hostMatch[1];
+  const pathPart = hostMatch[2] || "";
+  const db = pathPart.split("?")[0] || "digixvalley";
+  const credsPart = rest.slice(0, rest.length - hostMatch[0].length);
   const colonIdx = credsPart.indexOf(":");
 
   if (colonIdx === -1) {
@@ -42,7 +44,7 @@ function normalizeMongoUri(uri) {
   const user = credsPart.slice(0, colonIdx);
   const password = credsPart.slice(colonIdx + 1);
 
-  return buildMongoUri(user, password, hostAndPath.split("/")[0], hostAndPath.split("/")[1]?.split("?")[0] || "digixvalley");
+  return buildMongoUri(user, password, host, db);
 }
 
 function getMongoUri() {
@@ -75,12 +77,8 @@ function getMongoUri() {
   const normalized = normalizeMongoUri(rawUri);
 
   if (!normalized.includes(".mongodb.net")) {
-    console.error("Could not parse MONGODB_URI — password may contain @ symbol.");
-    console.error("Use these Railway variables instead:");
-    console.error("  MONGODB_USER=hamzaamjad038");
-    console.error("  MONGODB_PASSWORD=your-password");
-    console.error("  MONGODB_HOST=cluster0.zwgplmh.mongodb.net");
-    console.error("  MONGODB_DB=jurzbind");
+    console.error("Could not parse MONGODB_URI.");
+    console.error("Use separate variables: MONGODB_USER, MONGODB_PASSWORD, MONGODB_HOST, MONGODB_DB");
     return null;
   }
 
@@ -109,26 +107,51 @@ app.use(express.json());
 
 if (!MONGODB_URI || !validateMongoUri(MONGODB_URI)) {
   console.error(
-    "MongoDB config missing or invalid! Set MONGODB_USER + MONGODB_PASSWORD + MONGODB_HOST + MONGODB_DB on Railway.",
+    "MongoDB config missing or invalid! Set MONGODB_USER + MONGODB_PASSWORD + MONGODB_HOST + MONGODB_DB",
   );
-  process.exit(1);
+} else {
+  const maskedUri = MONGODB_URI.replace(/:([^@/]+)@/, ":****@");
+  const hostLog = MONGODB_URI.match(/@([\w.-]+\.mongodb\.net)/)?.[1] || "unknown";
+  console.log("Connecting to MongoDB host:", hostLog);
+  console.log("Connection string:", maskedUri);
 }
 
-const maskedUri = MONGODB_URI.replace(/:([^@/]+)@/, ":****@");
-const hostLog = MONGODB_URI.match(/@([\w.-]+\.mongodb\.net)/)?.[1] || "unknown";
-console.log("Connecting to MongoDB host:", hostLog);
-console.log("Connection string:", maskedUri);
+let reconnectScheduled = false;
 
-// MongoDB Connection
-mongoose
-  .connect(MONGODB_URI, {
-    serverSelectionTimeoutMS: 10000,
-  })
-  .then(() => console.log("MongoDB Connected Successfully"))
-  .catch((err) => {
-    console.error("MongoDB Connection Error:", err);
-    process.exit(1);
-  });
+const scheduleReconnect = () => {
+  if (reconnectScheduled) return;
+  reconnectScheduled = true;
+  console.log("Retrying MongoDB connection in 5 seconds...");
+  setTimeout(() => {
+    reconnectScheduled = false;
+    connectMongo();
+  }, 5000);
+};
+
+const connectMongo = async () => {
+  if (!MONGODB_URI) return;
+
+  if (mongoose.connection.readyState === 1) return;
+
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+    });
+    console.log("MongoDB Connected Successfully");
+  } catch (err) {
+    console.error("MongoDB Connection Error:", err.message);
+    scheduleReconnect();
+  }
+};
+
+mongoose.connection.on("disconnected", () => {
+  console.log("MongoDB disconnected. Reconnecting...");
+  scheduleReconnect();
+});
+
+if (MONGODB_URI) {
+  connectMongo();
+}
 
 const ensureDbConnected = (req, res, next) => {
   if (mongoose.connection.readyState !== 1) {
