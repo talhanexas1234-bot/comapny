@@ -14,19 +14,67 @@ const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL || "sabadigixvalley@gmail.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "12345678";
 
+function buildMongoUri(user, password, host, db) {
+  return `mongodb+srv://${user}:${encodeURIComponent(password)}@${host}/${db}?retryWrites=true&w=majority`;
+}
+
+function normalizeMongoUri(uri) {
+  const prefix = "mongodb+srv://";
+  if (!uri.startsWith(prefix)) {
+    return uri;
+  }
+
+  const rest = uri.slice(prefix.length);
+  const hostMatch = rest.match(/@(cluster[\w.-]+\.mongodb\.net\/.+)$/i);
+
+  if (!hostMatch) {
+    return uri;
+  }
+
+  const hostAndPath = hostMatch[1];
+  const credsPart = rest.slice(0, rest.length - hostAndPath.length - 1);
+  const colonIdx = credsPart.indexOf(":");
+
+  if (colonIdx === -1) {
+    return uri;
+  }
+
+  const user = credsPart.slice(0, colonIdx);
+  const password = credsPart.slice(colonIdx + 1);
+
+  return buildMongoUri(user, password, hostAndPath.split("/")[0], hostAndPath.split("/")[1]?.split("?")[0] || "digixvalley");
+}
+
 function getMongoUri() {
   const user = process.env.MONGODB_USER?.trim();
   const password = process.env.MONGODB_PASSWORD?.trim();
-  const host =
-    process.env.MONGODB_HOST?.trim() || "cluster0.njla2ph.mongodb.net";
+  const host = process.env.MONGODB_HOST?.trim();
   const db = process.env.MONGODB_DB?.trim() || "digixvalley";
 
-  if (user && password) {
-    return `mongodb+srv://${user}:${encodeURIComponent(password)}@${host}/${db}?retryWrites=true&w=majority`;
+  if (user && password && host) {
+    return buildMongoUri(user, password, host, db);
   }
 
-  const uri = process.env.MONGODB_URI?.trim().replace(/^["']|["']$/g, "");
-  return uri || null;
+  const rawUri = process.env.MONGODB_URI?.trim().replace(/^["']|["']$/g, "");
+  if (!rawUri) {
+    return null;
+  }
+
+  return normalizeMongoUri(rawUri);
+}
+
+function validateMongoUri(uri) {
+  if (!uri.includes(".mongodb.net")) {
+    console.error(
+      "Invalid MONGODB_URI: host must contain .mongodb.net",
+    );
+    console.error(
+      "If your password has @ symbol, use separate Railway variables:",
+    );
+    console.error("MONGODB_USER, MONGODB_PASSWORD, MONGODB_HOST, MONGODB_DB");
+    return false;
+  }
+  return true;
 }
 
 const MONGODB_URI = getMongoUri();
@@ -35,9 +83,9 @@ const MONGODB_URI = getMongoUri();
 app.use(cors());
 app.use(express.json());
 
-if (!MONGODB_URI) {
+if (!MONGODB_URI || !validateMongoUri(MONGODB_URI)) {
   console.error(
-    "MongoDB config missing! Set MONGODB_URI or MONGODB_USER + MONGODB_PASSWORD on Railway.",
+    "MongoDB config missing or invalid! Set MONGODB_USER + MONGODB_PASSWORD + MONGODB_HOST + MONGODB_DB on Railway.",
   );
   process.exit(1);
 }
