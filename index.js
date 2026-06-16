@@ -13,14 +13,32 @@ const JWT_SECRET =
 const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL || "sabadigixvalley@gmail.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "12345678";
-const MONGODB_URI = process.env.MONGODB_URI;
+
+function getMongoUri() {
+  const user = process.env.MONGODB_USER?.trim();
+  const password = process.env.MONGODB_PASSWORD?.trim();
+  const host =
+    process.env.MONGODB_HOST?.trim() || "cluster0.njla2ph.mongodb.net";
+  const db = process.env.MONGODB_DB?.trim() || "digixvalley";
+
+  if (user && password) {
+    return `mongodb+srv://${user}:${encodeURIComponent(password)}@${host}/${db}?retryWrites=true&w=majority`;
+  }
+
+  const uri = process.env.MONGODB_URI?.trim().replace(/^["']|["']$/g, "");
+  return uri || null;
+}
+
+const MONGODB_URI = getMongoUri();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
 if (!MONGODB_URI) {
-  console.error("MONGODB_URI environment variable is required!");
+  console.error(
+    "MongoDB config missing! Set MONGODB_URI or MONGODB_USER + MONGODB_PASSWORD on Railway.",
+  );
   process.exit(1);
 }
 
